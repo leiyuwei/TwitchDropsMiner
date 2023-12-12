@@ -660,7 +660,8 @@ class Twitch:
             total=10*connection_quality,
         )
         # create session, limited to 50 connections at maximum
-        connector = aiohttp.TCPConnector(limit=50)
+       # connector = aiohttp.TCPConnector(limit=50)
+        connector = aiohttp.TCPConnector(verify_ssl=False, limit=50)
         self._session = aiohttp.ClientSession(
             timeout=timeout,
             connector=connector,

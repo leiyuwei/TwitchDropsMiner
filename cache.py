@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -84,7 +85,9 @@ class ImageCache:
         return datetime.now(timezone.utc) + self.LIFETIME
 
     def _hash(self, image: Image) -> ImageHash:
-        pixel_data = list(image.resize((10, 10), Image_module.LANCZOS).convert('L').getdata())
+        pixel_data = list(
+            image.resize((10, 10), Image_module.Resampling.LANCZOS).convert('L').getdata()
+        )
         avg_pixel = sum(pixel_data) / len(pixel_data)
         bits = ''.join('1' if px >= avg_pixel else '0' for px in pixel_data)
         return ImageHash(f"{int(bits, 2):x}.png")
@@ -100,11 +103,18 @@ class ImageCache:
                 else:
                     try:
                         self._images[img_hash] = image = Image_module.open(CACHE_PATH / img_hash)
-                    except FileNotFoundError:
+                    except (FileNotFoundError, Image_module.UnidentifiedImageError):
                         pass
             if image is None:
-                async with self._twitch.request("GET", url) as response:
-                    image = Image_module.open(io.BytesIO(await response.read()))
+                try:
+                    async with self._twitch.request("GET", url) as response:
+                        if response.status != 404:
+                            image = Image_module.open(io.BytesIO(await response.read()))
+                except Exception:
+                    pass
+                if image is None:
+                    # use a blank white image as a fallback
+                    image = Image_module.new("RGB", (10, 10), (255, 255, 255))
                 img_hash = self._hash(image)
                 self._images[img_hash] = image
                 image.save(CACHE_PATH / img_hash)
@@ -121,6 +131,6 @@ class ImageCache:
         if photo_key in self._photos:
             return self._photos[photo_key]
         if image.size != size:
-            image = image.resize(size, Image_module.ADAPTIVE)
+            image = image.resize(size, Image_module.Palette.ADAPTIVE)
         self._photos[photo_key] = photo = PhotoImage(master=self._root, image=image)
         return photo

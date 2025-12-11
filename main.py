@@ -16,11 +16,10 @@ if __name__ == "__main__":
     import traceback
     import tkinter as tk
     from tkinter import messagebox
-    from typing import IO, NoReturn
+    from typing import NoReturn, TYPE_CHECKING
 
-    if sys.platform == "linux" and sys.version_info >= (3, 10):
-        import truststore
-        truststore.inject_into_ssl()
+    import truststore
+    truststore.inject_into_ssl()
 
     from translate import _
     from twitch import Twitch
@@ -28,16 +27,25 @@ if __name__ == "__main__":
     from version import __version__
     from exceptions import CaptchaRequired
     from utils import lock_file, resource_path, set_root_icon
-    from constants import CALL, SELF_PATH, FILE_FORMATTER, LOG_PATH, LOCK_PATH
+    from constants import LOGGING_LEVELS, SELF_PATH, FILE_FORMATTER, LOG_PATH, LOCK_PATH
+
+    if TYPE_CHECKING:
+        from _typeshed import SupportsWrite
 
     warnings.simplefilter("default", ResourceWarning)
+
+    # import tracemalloc
+    # tracemalloc.start(3)
+
+    if sys.version_info < (3, 10):
+        raise RuntimeError("Python 3.10 or higher is required")
 
     class Parser(argparse.ArgumentParser):
         def __init__(self, *args, **kwargs) -> None:
             super().__init__(*args, **kwargs)
             self._message: io.StringIO = io.StringIO()
 
-        def _print_message(self, message: str, file: IO[str] | None = None) -> None:
+        def _print_message(self, message: str, file: SupportsWrite[str] | None = None) -> None:
             self._message.write(message)
             # print(message, file=self._message)
 
@@ -53,18 +61,12 @@ if __name__ == "__main__":
         _debug_gql: bool
         log: bool
         tray: bool
-        no_run_check: bool
+        dump: bool
 
         # TODO: replace int with union of literal values once typeshed updates
         @property
         def logging_level(self) -> int:
-            return {
-                0: logging.ERROR,
-                1: logging.WARNING,
-                2: logging.INFO,
-                3: CALL,
-                4: logging.DEBUG,
-            }[min(self._verbose, 4)]
+            return LOGGING_LEVELS[min(self._verbose, 4)]
 
         @property
         def debug_ws(self) -> int:
@@ -93,7 +95,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.overrideredirect(True)
     root.withdraw()
-    set_root_icon(root, resource_path("pickaxe.ico"))
+    set_root_icon(root, resource_path("icons/pickaxe.ico"))
     root.update()
     parser = Parser(
         SELF_PATH.name,
@@ -103,6 +105,7 @@ if __name__ == "__main__":
     parser.add_argument("-v", dest="_verbose", action="count", default=0)
     parser.add_argument("--tray", action="store_true")
     parser.add_argument("--log", action="store_true")
+    parser.add_argument("--dump", action="store_true")
     # undocumented debug args
     parser.add_argument(
         "--debug-ws", dest="_debug_ws", action="store_true", help=argparse.SUPPRESS
@@ -172,8 +175,12 @@ if __name__ == "__main__":
             client.print(_("gui", "status", "exiting"))
             await client.shutdown()
         if not client.gui.close_requested:
+            # user didn't request the closure
+            client.gui.tray.change_icon("error")
             client.print(_("status", "terminated"))
             client.gui.status.update(_("gui", "status", "terminated"))
+            # notify the user about the closure
+            client.gui.grab_attention(sound=True)
         await client.gui.wait_until_closed()
         # save the application state
         # NOTE: we have to do it after wait_until_closed,
